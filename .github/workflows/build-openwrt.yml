@@ -1,0 +1,59 @@
+name: Build OpenWRT for RK3128 Printer Server
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'OpenWRT版本'
+        required: true
+        default: '21.02.3'
+        type: choice
+        options:
+          - '22.03.5'
+          - '21.02.3'
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      OPENWRT_VERSION: ${{ github.event.inputs.version || '21.02.3' }}
+      TARGET: rockchip
+      SUBTARGET: armv8
+      PROFILE: friendlyarm_nanopi-r2s
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Setup build environment
+        run: sudo apt-get update && sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time xsltproc zlib1g-dev
+      - name: Download OpenWRT source
+        run: git clone --depth=1 https://github.com/openwrt/openwrt.git openwrt-src && cd openwrt-src && git checkout v${{ env.OPENWRT_VERSION }}
+      - name: Update feeds
+        run: cd openwrt-src && ./scripts/feeds update -a && ./scripts/feeds install -a
+      - name: Apply RK3128 configuration
+        run: cd openwrt-src && cat ../configs/rk3128.config >> .config && cat ../configs/printer-server.config >> .config
+      - name: Copy custom files
+        run: cd openwrt-src && cp -r ../files/* .
+      - name: Configure build
+        run: cd openwrt-src && make defconfig
+      - name: Run oldconfig
+        run: cd openwrt-src && yes "" | make oldconfig
+      - name: Download packages
+        run: cd openwrt-src && make download -j$(nproc)
+      - name: Build OpenWRT
+        run: cd openwrt-src && make -j$(($(nproc) + 1)) V=s
+      - name: List built images
+        run: cd openwrt-src/bin/targets/rockchip/armv8 && ls -lh *sysupgrade*.img *rootfs*.img *.gz
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-rk3128-printer-${{ env.OPENWRT_VERSION }}
+          path: openwrt-src/bin/targets/rockchip/armv8/openwrt-*-friendlyarm_nanopi-r2s-*.img.gz
+          retention-days: 7
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ env.OPENWRT_VERSION }}
+          path: openwrt-src/build.log
+          retention-days: 3
