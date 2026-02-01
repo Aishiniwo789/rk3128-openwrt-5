@@ -1,0 +1,26 @@
+name: Fast Build OpenWRT
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache OpenWRT source
+        uses: actions/cache@v3
+        with:
+          path: openwrt-cache
+          key: openwrt-source-21.02.3
+      - name: Prepare environment
+        run: sudo apt-get update && sudo apt-get install -y build-essential ccache git libncurses5-dev libssl-dev python3 python3-distutils python3-setuptools rsync subversion
+      - name: Get OpenWRT source
+        run: if [ ! -d "openwrt-cache" ]; then git clone --depth=1 https://github.com/openwrt/openwrt.git openwrt-cache && cd openwrt-cache && git checkout v21.02.3; fi && cp -r openwrt-cache openwrt-build && cd openwrt-build
+      - name: Configure minimal build
+        run: cd openwrt-build && cp ../configs/rk3128.config .config && cp ../configs/printer-server.config .config.tmp && cat .config.tmp >> .config && rm .config.tmp && make defconfig
+      - name: Build with cache
+        run: cd openwrt-build && make -j$(nproc) V=sc
+      - name: Upload image
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-rk3128-fast
+          path: openwrt-build/bin/targets/rockchip/armv8/openwrt-*-sysupgrade*.img.gz
