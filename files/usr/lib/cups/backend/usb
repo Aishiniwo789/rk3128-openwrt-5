@@ -1,0 +1,12 @@
+#!/bin/sh
+# USB backend for CUPS
+# 确保USB打印机能被正确识别
+
+# 检查USB打印机设备
+for device in /dev/usb/lp* /dev/usblp*; do
+    if [ -c "$device" ]; then
+        echo "direct $device \"Unknown USB Printer\" \"USB\""
+    fi
+done
+
+exit 0
