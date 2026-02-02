@@ -150,6 +150,138 @@ EOF
         name: rk3128-printer-firmware
         path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/
         retention-days: 30
+    
+    - name: Upload Build Logs
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-logs
+        path: openwrt/build.log
+        retention-days: 7
+    
+    - name: Upload Error Details on Failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: error-details
+        path: |
+          openwrt/
+          !openwrt/.git/
+        retention-days: 7          fastjar \
+          file \
+          g++ \
+          gawk \
+          gettext \
+          git \
+          libncurses5-dev \
+          libncursesw5-dev \
+          libssl-dev \
+          python3 \
+          python3-distutils \
+          python3-setuptools \
+          python3-dev \
+          rsync \
+          subversion \
+          swig \
+          time \
+          unzip \
+          wget \
+          python3-pyelftools \
+          zlib1g-dev \
+          lib32z1-dev
+    
+    - name: Clone OpenWrt Source
+      run: |
+        echo "克隆 OpenWrt ${{ env.OPENWRT_VERSION }} 源码..."
+        git clone --depth=1 --branch v${{ env.OPENWRT_VERSION }} https://github.com/openwrt/openwrt.git openwrt
+        cd openwrt
+        echo "源码克隆完成，当前目录: $(pwd)"
+    
+    - name: Copy Configuration
+      run: |
+        echo "复制配置文件..."
+        cp .config openwrt/
+        cd openwrt
+        echo "验证配置文件..."
+        if [ ! -f ".config" ]; then
+          echo "错误: .config 文件不存在"
+          exit 1
+        fi
+        echo "检查关键配置:"
+        grep -E "CONFIG_TARGET|CONFIG_PACKAGE.*(cups|p910nd|dnsmasq)" .config | head -10
+    
+    - name: Setup Feeds
+      run: |
+        cd openwrt
+        echo "配置软件源..."
+        cat > feeds.conf.default << 'EOF'
+src-git packages https://git.openwrt.org/feed/packages.git;openwrt-19.07
+src-git luci https://git.openwrt.org/project/luci.git;openwrt-19.07
+src-git routing https://git.openwrt.org/feed/routing.git;openwrt-19.07
+src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-19.07
+EOF
+        echo "更新软件源..."
+        ./scripts/feeds update -a
+        echo "安装软件包..."
+        ./scripts/feeds install -a
+    
+    - name: Apply Configuration
+      run: |
+        cd openwrt
+        echo "应用配置..."
+        make defconfig
+        echo "检查包冲突..."
+        # 确保 dnsmasq-full 被禁用
+        if grep -q "CONFIG_PACKAGE_dnsmasq-full=y" .config; then
+          echo "修复: 禁用 dnsmasq-full 以避免冲突"
+          sed -i 's/CONFIG_PACKAGE_dnsmasq-full=y/CONFIG_PACKAGE_dnsmasq-full=n/' .config
+        fi
+    
+    - name: Download Sources
+      if: ${{ github.event.inputs.skip_download != 'true' }}
+      run: |
+        cd openwrt
+        echo "下载源码包..."
+        make -j$(nproc) download
+        echo "安装编译工具..."
+        make -j$(nproc) tools/install
+        make -j$(nproc) toolchain/install
+    
+    - name: Build Firmware
+      run: |
+        cd openwrt
+        echo "开始编译固件..."
+        # 使用并行编译，如果失败则降级到单线程详细模式
+        make -j$(($(nproc)+1)) V=s 2>&1 | tee build.log || make -j1 V=s 2>&1 | tee build-detail.log
+        
+        echo "编译完成，检查输出..."
+        if [ $? -eq 0 ]; then
+          echo "编译成功!"
+        else
+          echo "编译过程遇到错误，查看详细日志"
+        fi
+    
+    - name: Check Output Files
+      run: |
+        cd openwrt
+        echo "查找输出文件..."
+        if [ -d "bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}" ]; then
+          echo "找到输出目录:"
+          ls -la "bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/"
+          echo "固件文件列表:"
+          find "bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/" -type f \( -name "*.img*" -o -name "*.bin*" \) | sort
+        else
+          echo "警告: 标准输出目录未找到"
+          echo "搜索所有可能的输出文件:"
+          find bin/ -type f \( -name "*.img*" -o -name "*.bin*" \) 2>/dev/null | head -10 || true
+        fi
+    
+    - name: Upload Firmware
+      if: success()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rk3128-printer-firmware
+        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/
+        retention-days: 30
         if-no-files-found: error
     
     - name: Upload Build Logs
