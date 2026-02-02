@@ -13,6 +13,7 @@ on:
       - 'README.md'
       - 'LICENSE'
       - '.gitignore'
+      - 'FLASH_GUIDE.md'
 
 env:
   OPENWRT_VERSION: "21.02.7"
@@ -23,74 +24,67 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 150
-    container:
-      image: openwrtorg/sdk:arm_cortex-a7_neon-vfpv4-openwrt-21.02.7
-      options: --privileged
-
+    timeout-minutes: 120
+    
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 1
-
+      uses: actions/checkout@v4
+    
     - name: Setup Build Environment
-      run: sudo apt-get update && sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time unzip wget python3-pyelftools
-
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev
+    
     - name: Clone OpenWrt Source
-      run: git clone --depth=1 --branch v${{ env.OPENWRT_VERSION }} https://github.com/openwrt/openwrt.git openwrt-source
-
+      run: |
+        git clone --depth=1 --branch v${{ env.OPENWRT_VERSION }} https://github.com/openwrt/openwrt.git openwrt-source
+        cd openwrt-source
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-${{ env.OPENWRT_VERSION }}" > feeds.conf.default
+        echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-${{ env.OPENWRT_VERSION }}" >> feeds.conf.default
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;openwrt-${{ env.OPENWRT_VERSION }}" >> feeds.conf.default
+        echo "src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-${{ env.OPENWRT_VERSION }}" >> feeds.conf.default
+    
     - name: Copy Configuration
       run: cp .config openwrt-source/
-
-    - name: Setup Feeds
+    
+    - name: Update and Install Feeds
       run: |
         cd openwrt-source
-        cat > feeds.conf.default << 'EOF'
-        src-git packages https://git.openwrt.org/feed/packages.git;openwrt-${{ env.OPENWRT_VERSION }}
-        src-git luci https://git.openwrt.org/project/luci.git;openwrt-${{ env.OPENWRT_VERSION }}
-        src-git routing https://git.openwrt.org/feed/routing.git;openwrt-${{ env.OPENWRT_VERSION }}
-        src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-${{ env.OPENWRT_VERSION }}
-        EOF
         ./scripts/feeds update -a
         ./scripts/feeds install -a
-
+    
     - name: Apply Configuration
       run: |
         cd openwrt-source
         make defconfig
-        ./scripts/diffconfig.sh > diffconfig
-        cat diffconfig
-
+    
     - name: Download Sources
       run: |
         cd openwrt-source
         make -j$(nproc) download
         make -j$(nproc) tools/install
         make -j$(nproc) toolchain/install
-
+    
     - name: Compile Firmware
       run: |
         cd openwrt-source
-        make -j$(nproc) V=s
-
-    - name: List Output Files
-      run: |
-        cd openwrt-source/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}
-        ls -la
-
-    - name: Upload Firmware
-      uses: actions/upload-artifact@v3
+        make -j$(nproc) V=sc
+    
+    - name: Upload Firmware Artifacts
+      uses: actions/upload-artifact@v4
       with:
-        name: rk3128-printer-server-${{ github.sha }}
-        path: openwrt-source/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}
+        name: rk3128-printer-server-${{ github.sha }}-${{ github.run_id }}
+        path: openwrt-source/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
         retention-days: 30
-
-    - name: Create Release on Tag
-      if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v1
+        if-no-files-found: error
+    
+    - name: Upload Build Logs on Failure
+      if: failure()
+      uses: actions/upload-artifact@v4
       with:
-        files: openwrt-source/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*.img.gz
-        name: RK3128 Printer Server ${{ github.ref_name }}
-        draft: false
-        prerelease: false
+        name: build-logs-${{ github.run_id }}
+        path: |
+          openwrt-source/logs/
+          openwrt-source/.config
+        retention-days: 7
+        if-no-files-found: warn
