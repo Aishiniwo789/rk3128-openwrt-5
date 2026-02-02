@@ -1,31 +1,41 @@
-# RK3128 OpenWRT Printer Server
+# RK3128 打印机服务器 OpenWrt 编译项目
 
-为RK3128电视盒子定制的OpenWRT打印机服务器固件。
+## 项目说明
+为索信 TP-9038 (RK3128芯片) 电视盒子编译 OpenWrt 固件，集成打印机服务器功能。
 
-## 特性
-- 完整的CUPS打印机服务器
-- Avahi mDNS/DNS-SD服务发现
-- LuCI Web管理界面
-- 优化的USB打印机支持
-- 针对2GB内存优化
+## 设备信息
+- 型号：索信 TP-9038
+- 芯片：Rockchip RK3128
+- 内存：1GB
+- 存储：8GB eMMC
+- 接口：2×USB, HDMI, 网口, AV, 无线
+
+## 包含功能
+1. **打印机服务器**
+   - CUPS 完整打印系统
+   - p910nd 轻量级打印服务
+   - USB 打印机自动检测
+   - 网络打印机支持
+
+2. **网络功能**
+   - 有线网络 (RTL8169)
+   - 无线网络 (RTL8188/8192)
+   - DHCP 服务器
+   - 防火墙基础功能
+
+3. **管理界面**
+   - LuCI 中文管理界面
+   - CUPS 网页管理
+   - 打印机状态监控
 
 ## 使用方法
 
-### GitHub Actions云编译
-1. Fork这个仓库
-2. 进入 `Actions` 标签页
-3. 选择 `Build OpenWRT for RK3128 Printer Server`
-4. 点击 `Run workflow`，选择21.02.3版本
-5. 等待60-90分钟
-6. 在 `Artifacts` 中下载固件
+### 1. 设置仓库
+```bash
+# 克隆或创建新仓库
+git clone https://github.com/你的用户名/RK3128-Printer-Server.git
+cd RK3128-Printer-Server
 
-### 刷写步骤
-1. 进入MaskROM模式：短接闪存CLK和GND引脚
-2. 使用RKDevTool刷写固件
-3. 首次启动访问：http://192.168.1.1
-4. 打印机管理：http://192.168.1.1:631
-
-## 支持的打印机
-- 所有USB接口打印机
-- 网络打印机（IPP协议）
-- 大多数主流品牌打印机
+# 运行验证脚本
+chmod +x verify.sh
+./verify.sh
