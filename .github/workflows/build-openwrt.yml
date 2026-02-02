@@ -2,17 +2,12 @@ name: Build OpenWrt for RK3128 Printer Server
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: '使用 ImmortalWrt 分支'
-        required: false
-        default: 'openwrt-21.02'
   push:
     branches: [ main, master ]
 
 env:
   TARGET: "rockchip"
-  SUBTARGET: "rk3128"
+  SUBTARGET: "armv8"
 
 jobs:
   build:
@@ -23,14 +18,11 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
     
-    - name: Install Build Dependencies (with Python 2.7)
+    - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        # 安装 Python 2.7 和 Python 3
         sudo apt-get install -y python2.7 python2.7-dev python3 python3-dev
         sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git libncurses5-dev libncursesw5-dev libssl-dev python3-distutils python3-setuptools rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev lib32z1-dev
-        # 创建 python2 符号链接
-        sudo ln -sf /usr/bin/python2.7 /usr/bin/python2
         sudo ln -sf /usr/bin/python2.7 /usr/bin/python
     
     - name: Clone ImmortalWrt 21.02
@@ -38,20 +30,27 @@ jobs:
         echo "克隆 ImmortalWrt openwrt-21.02 分支..."
         git clone --depth=1 --branch openwrt-21.02 https://github.com/immortalwrt/immortalwrt.git openwrt
         cd openwrt
-        echo "源码克隆完成，当前目录: $(pwd)"
+        echo "源码克隆完成"
     
-    - name: Copy Configuration
+    - name: Copy Configuration and Verify
       run: |
         echo "复制配置文件..."
         cp .config openwrt/
         cd openwrt
         echo "验证配置文件..."
-        if [ ! -f ".config" ]; then
-          echo "错误: .config 文件不存在"
+        echo "当前目录: $(pwd)"
+        echo "配置文件内容摘要:"
+        echo "========================"
+        grep -E "CONFIG_TARGET|CONFIG_DEVICE" .config
+        echo "========================"
+        
+        # 确保设备配置正确
+        if ! grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_tlink-r1=y" .config; then
+          echo "错误: 未正确配置 tlink-r1 设备"
+          echo "当前设备配置:"
+          grep "CONFIG_TARGET.*DEVICE" .config
           exit 1
         fi
-        echo "检查关键配置:"
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE.*(cups|p910nd|dnsmasq)" .config | head -10
     
     - name: Setup Feeds
       run: |
@@ -65,63 +64,77 @@ jobs:
         cd openwrt
         echo "应用配置..."
         make defconfig
-        echo "检查包冲突..."
-        # 确保 dnsmasq-full 被禁用
-        if grep -q "CONFIG_PACKAGE_dnsmasq-full=y" .config; then
-          echo "修复: 禁用 dnsmasq-full 以避免冲突"
-          sed -i 's/CONFIG_PACKAGE_dnsmasq-full=y/CONFIG_PACKAGE_dnsmasq-full=n/' .config
-        fi
-        echo "最终配置摘要:"
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE.*(cups|p910nd|usb-printer)" .config
+        echo "配置应用完成，检查最终配置:"
+        echo "目标设备:"
+        grep "CONFIG_TARGET.*DEVICE" .config
+        echo "目标架构:"
+        grep "CONFIG_TARGET.*armv8" .config
     
     - name: Download Sources
       run: |
         cd openwrt
         echo "下载源码包..."
         make -j$(nproc) download
-        echo "下载完成"
     
     - name: Build Firmware
       run: |
         cd openwrt
         echo "开始编译固件..."
-        # 使用 FORCE=1 跳过严格检查
-        make FORCE=1 -j$(($(nproc)+1)) V=s 2>&1 | tee build.log || make FORCE=1 -j1 V=s 2>&1 | tee build-detail.log
+        echo "当前配置的设备: $(grep 'CONFIG_TARGET.*DEVICE' .config)"
+        make FORCE=1 -j$(($(nproc)+1)) V=s 2>&1 | tee build.log
         echo "编译完成，退出码: $?"
     
-    - name: Check Output Files
+    - name: Find and List Firmware Files
       run: |
         cd openwrt
-        echo "查找所有可能的输出文件..."
-        # 搜索所有固件文件
-        find . -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null | grep -v ".git" | head -30
+        echo "详细查找固件文件..."
+        echo "当前目录: $(pwd)"
         
-        echo "检查目标目录结构..."
-        if [ -d "bin/targets/rockchip" ]; then
-          echo "Rockchip 目标目录存在:"
-          ls -la bin/targets/rockchip/
-          find bin/targets/rockchip/ -type d -name "*rk3128*" -o -name "*arm*" 2>/dev/null | while read dir; do
-            echo "检查目录: $dir"
-            ls -la "$dir"
-          done
+        # 查找所有可能的输出目录
+        echo "检查bin目录结构:"
+        find bin/ -type d 2>/dev/null | grep -v ".git" | sort
+        
+        # 查找所有固件文件
+        echo "查找所有固件文件:"
+        find . -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null | grep -v ".git" | sort
+        
+        # 特别查找tlink相关文件
+        echo "查找tlink相关文件:"
+        find . -type f -name "*tlink*" 2>/dev/null
+        
+        # 查找RK3128相关文件
+        echo "查找RK3128相关文件:"
+        find . -type f -name "*rk3128*" 2>/dev/null
+        
+        # 检查标准输出目录
+        if [ -d "bin/targets/rockchip/armv8" ]; then
+          echo "标准输出目录内容:"
+          ls -la bin/targets/rockchip/armv8/
+          echo "固件文件列表:"
+          find bin/targets/rockchip/armv8/ -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null
         fi
-        
-        # 特别检查 RK3128 相关目录
-        echo "搜索 RK3128 相关文件..."
-        find bin/ -type f -name "*rk3128*" -o -name "*tlink*" 2>/dev/null | head -20
     
-    - name: Upload All Output Files
+    - name: Upload Firmware Files
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-output
-        path: openwrt/bin/
+        name: rk3128-firmware
+        path: |
+          openwrt/bin/targets/rockchip/armv8/*tlink*
+          openwrt/bin/targets/rockchip/armv8/*rk3128*
+          openwrt/bin/targets/rockchip/armv8/*.img.gz
+          openwrt/bin/targets/rockchip/armv8/*.bin
+        retention-days: 30
+    
+    - name: Upload All Output as Backup
+      uses: actions/upload-artifact@v4
+      with:
+        name: all-output-backup
+        path: openwrt/bin/targets/rockchip/armv8/
         retention-days: 30
     
     - name: Upload Build Logs
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: |
-          openwrt/build.log
-          openwrt/build-detail.log
+        path: openwrt/build.log
         retention-days: 7
