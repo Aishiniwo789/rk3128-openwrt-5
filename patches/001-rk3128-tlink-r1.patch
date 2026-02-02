@@ -1,0 +1,23 @@
+From: RK3128 Printer Server Build
+Date: $(date)
+Subject: Fix RK3128 tlink_r1 device tree
+
+--- a/target/linux/rockchip/image/tlink_r1.mk
++++ b/target/linux/rockchip/image/tlink_r1.mk
+@@ -1,5 +1,5 @@
+ define Device/tlink_r1
+-  DEVICE_VENDOR := T-Link
++  DEVICE_VENDOR := TP-9038
+   DEVICE_MODEL := R1
+   SOC := rk3128
+   UBOOT_DEVICE_NAME := tlink-r1
+@@ -7,7 +7,9 @@
+   IMAGE/sysupgrade.img.gz := boot-combined | pad-to 128k | gzip | append-metadata
+   DEVICE_PACKAGES := kmod-rtl8xxxu kmod-rtl8192cu kmod-usb-storage
+   SUPPORTED_DEVICES := tlink,r1
+-  DEVICE_DTS := rk3128-tlink-r1
++  DEVICE_DTS := rockchip/rk3128-tlink-r1
++  IMAGE_SIZE := 256m
++  KERNEL := kernel-bin | gzip | uImage gzip
+ endef
+ TARGET_DEVICES += tlink_r1
