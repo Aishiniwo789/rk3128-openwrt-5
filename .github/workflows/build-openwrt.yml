@@ -6,7 +6,7 @@ on:
       version:
         description: 'OpenWrt version'
         required: false
-        default: '21.02.7'
+        default: '21.02'
   push:
     branches: [ main, master ]
     paths-ignore:
@@ -16,7 +16,7 @@ on:
       - 'FLASH_GUIDE.md'
 
 env:
-  OPENWRT_VERSION: "21.02.7"
+  OPENWRT_VERSION: "21.02"
   TARGET: "rockchip"
   SUBTARGET: "rk3128"
   PROFILE: "tlink_r1"
@@ -33,16 +33,16 @@ jobs:
     - name: Setup Build Environment
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev
+        sudo DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git java-propose-classpath libelf-dev libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev lib32z1-dev
     
     - name: Clone OpenWrt Source
       run: |
-        git clone --depth=1 --branch v${{ env.OPENWRT_VERSION }} https://github.com/openwrt/openwrt.git openwrt-source
+        git clone --depth=1 --branch v21.02.7 https://github.com/openwrt/openwrt.git openwrt-source
         cd openwrt-source
-        echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-${{ env.OPENWRT_VERSION }}" > feeds.conf.default
-        echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-${{ env.OPENWRT_VERSION }}" >> feeds.conf.default
-        echo "src-git routing https://git.openwrt.org/feed/routing.git;openwrt-${{ env.OPENWRT_VERSION }}" >> feeds.conf.default
-        echo "src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-${{ env.OPENWRT_VERSION }}" >> feeds.conf.default
+        echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-21.02" > feeds.conf.default
+        echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-21.02" >> feeds.conf.default
+        echo "src-git routing https://git.openwrt.org/feed/routing.git;openwrt-21.02" >> feeds.conf.default
+        echo "src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-21.02" >> feeds.conf.default
     
     - name: Copy Configuration
       run: cp .config openwrt-source/
@@ -68,12 +68,12 @@ jobs:
     - name: Compile Firmware
       run: |
         cd openwrt-source
-        make -j$(nproc) V=sc
+        make -j$(nproc)
     
     - name: Upload Firmware Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: rk3128-printer-server-${{ github.sha }}-${{ github.run_id }}
+        name: rk3128-printer-server
         path: openwrt-source/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/*
         retention-days: 30
         if-no-files-found: error
@@ -82,9 +82,10 @@ jobs:
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-logs-${{ github.run_id }}
+        name: build-logs-${{ github.run_number }}
         path: |
           openwrt-source/logs/
           openwrt-source/.config
+          openwrt-source/build.log
         retention-days: 7
         if-no-files-found: warn
