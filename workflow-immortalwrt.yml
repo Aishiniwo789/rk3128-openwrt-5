@@ -1,0 +1,51 @@
+name: Build ImmortalWrt for RK3128
+
+on: [workflow_dispatch, push]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+    
+    - name: Setup Build Environment
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y build-essential ccache file g++ gawk gettext git libncurses5-dev libssl-dev python3 python3-distutils rsync unzip wget zlib1g-dev
+    
+    - name: Clone ImmortalWrt 21.02
+      run: |
+        git clone --depth=1 --branch openwrt-21.02 https://github.com/immortalwrt/immortalwrt.git openwrt-source
+    
+    - name: Copy Configuration
+      run: cp .config openwrt-source/
+    
+    - name: Setup Feeds
+      run: |
+        cd openwrt-source
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+    
+    - name: Configure Build
+      run: |
+        cd openwrt-source
+        make defconfig
+    
+    - name: Download Sources
+      run: |
+        cd openwrt-source
+        make -j$(nproc) download
+    
+    - name: Build Firmware
+      run: |
+        cd openwrt-source
+        make -j$(($(nproc)+1)) || make -j1 V=s
+    
+    - name: Upload Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: immortalwrt-firmware
+        path: openwrt-source/bin/targets/rockchip/rk3128/
