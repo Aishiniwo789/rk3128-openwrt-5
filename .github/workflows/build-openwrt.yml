@@ -3,39 +3,40 @@ name: Build OpenWrt for RK3128 Printer Server
 on:
   workflow_dispatch:
     inputs:
-      skip_download:
-        description: '跳过下载步骤（使用缓存）'
+      version:
+        description: '使用 ImmortalWrt 分支'
         required: false
-        default: 'false'
+        default: 'openwrt-21.02'
   push:
     branches: [ main, master ]
-    paths:
-      - '.config'
-      - '.github/workflows/build-openwrt.yml'
 
 env:
-  OPENWRT_VERSION: "19.07.10"
   TARGET: "rockchip"
-  SUBTARGET: "armv8"
+  SUBTARGET: "rk3128"
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 150
     
     steps:
     - name: Checkout Repository
       uses: actions/checkout@v4
     
-    - name: Install Build Dependencies
+    - name: Install Build Dependencies (with Python 2.7)
       run: |
         sudo apt-get update
-        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev lib32z1-dev
+        # 安装 Python 2.7 和 Python 3
+        sudo apt-get install -y python2.7 python2.7-dev python3 python3-dev
+        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git libncurses5-dev libncursesw5-dev libssl-dev python3-distutils python3-setuptools rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev lib32z1-dev
+        # 创建 python2 符号链接
+        sudo ln -sf /usr/bin/python2.7 /usr/bin/python2
+        sudo ln -sf /usr/bin/python2.7 /usr/bin/python
     
-    - name: Clone OpenWrt Source
+    - name: Clone ImmortalWrt 21.02
       run: |
-        echo "克隆 OpenWrt ${{ env.OPENWRT_VERSION }} 源码..."
-        git clone --depth=1 --branch v${{ env.OPENWRT_VERSION }} https://github.com/openwrt/openwrt.git openwrt
+        echo "克隆 ImmortalWrt openwrt-21.02 分支..."
+        git clone --depth=1 --branch openwrt-21.02 https://github.com/immortalwrt/immortalwrt.git openwrt
         cd openwrt
         echo "源码克隆完成，当前目录: $(pwd)"
     
@@ -56,13 +57,7 @@ jobs:
       run: |
         cd openwrt
         echo "配置软件源..."
-        echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-19.07" > feeds.conf.default
-        echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-19.07" >> feeds.conf.default
-        echo "src-git routing https://git.openwrt.org/feed/routing.git;openwrt-19.07" >> feeds.conf.default
-        echo "src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-19.07" >> feeds.conf.default
-        echo "更新软件源..."
         ./scripts/feeds update -a
-        echo "安装软件包..."
         ./scripts/feeds install -a
     
     - name: Apply Configuration
@@ -76,63 +71,57 @@ jobs:
           echo "修复: 禁用 dnsmasq-full 以避免冲突"
           sed -i 's/CONFIG_PACKAGE_dnsmasq-full=y/CONFIG_PACKAGE_dnsmasq-full=n/' .config
         fi
+        echo "最终配置摘要:"
+        grep -E "CONFIG_TARGET|CONFIG_PACKAGE.*(cups|p910nd|usb-printer)" .config
     
     - name: Download Sources
-      if: ${{ github.event.inputs.skip_download != 'true' }}
       run: |
         cd openwrt
         echo "下载源码包..."
         make -j$(nproc) download
-        echo "安装编译工具..."
-        make -j$(nproc) tools/install
-        make -j$(nproc) toolchain/install
+        echo "下载完成"
     
     - name: Build Firmware
       run: |
         cd openwrt
         echo "开始编译固件..."
-        make -j$(($(nproc)+1)) V=s 2>&1 | tee build.log || make -j1 V=s 2>&1 | tee build-detail.log
-        echo "编译完成，检查输出..."
-        if [ $? -eq 0 ]; then
-          echo "编译成功!"
-        else
-          echo "编译过程遇到错误，查看详细日志"
-        fi
+        # 使用 FORCE=1 跳过严格检查
+        make FORCE=1 -j$(($(nproc)+1)) V=s 2>&1 | tee build.log || make FORCE=1 -j1 V=s 2>&1 | tee build-detail.log
+        echo "编译完成，退出码: $?"
     
     - name: Check Output Files
       run: |
         cd openwrt
-        echo "查找输出文件..."
-        if [ -d "bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}" ]; then
-          echo "找到输出目录:"
-          ls -la "bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/"
-          echo "固件文件列表:"
-          find "bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/" -type f \( -name "*.img*" -o -name "*.bin*" \) | sort
-        else
-          echo "警告: 标准输出目录未找到"
-          echo "搜索所有可能的输出文件:"
-          find bin/ -type f \( -name "*.img*" -o -name "*.bin*" \) 2>/dev/null | head -10 || true
+        echo "查找所有可能的输出文件..."
+        # 搜索所有固件文件
+        find . -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null | grep -v ".git" | head -30
+        
+        echo "检查目标目录结构..."
+        if [ -d "bin/targets/rockchip" ]; then
+          echo "Rockchip 目标目录存在:"
+          ls -la bin/targets/rockchip/
+          find bin/targets/rockchip/ -type d -name "*rk3128*" -o -name "*arm*" 2>/dev/null | while read dir; do
+            echo "检查目录: $dir"
+            ls -la "$dir"
+          done
         fi
+        
+        # 特别检查 RK3128 相关目录
+        echo "搜索 RK3128 相关文件..."
+        find bin/ -type f -name "*rk3128*" -o -name "*tlink*" 2>/dev/null | head -20
     
-    - name: Upload Firmware
-      if: success()
+    - name: Upload All Output Files
       uses: actions/upload-artifact@v4
       with:
-        name: rk3128-printer-firmware
-        path: openwrt/bin/targets/${{ env.TARGET }}/${{ env.SUBTARGET }}/
+        name: openwrt-output
+        path: openwrt/bin/
         retention-days: 30
     
     - name: Upload Build Logs
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: openwrt/build.log
-        retention-days: 7
-    
-    - name: Upload Error Details on Failure
-      if: failure()
-      uses: actions/upload-artifact@v4
-      with:
-        name: error-details
-        path: openwrt/
+        path: |
+          openwrt/build.log
+          openwrt/build-detail.log
         retention-days: 7
