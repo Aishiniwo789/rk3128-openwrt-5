@@ -7,11 +7,6 @@ on:
   schedule:
     - cron: '0 2 * * 0'
 
-env:
-  TARGET: "rockchip"
-  SUBTARGET: "rk3128"
-  PROFILE: "tlink_r1"
-
 jobs:
   build:
     runs-on: ubuntu-22.04
@@ -26,25 +21,24 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git libncurses5-dev libncursesw5-dev libssl-dev python3 python3-distutils python3-setuptools python3-dev rsync subversion swig time unzip wget python3-pyelftools zlib1g-dev lib32z1-dev
     
-    - name: Clone OpenWrt Source (21.02.7)
+    - name: Clone OpenWrt Source
       run: |
         git clone --depth=1 --branch openwrt-21.02 https://github.com/openwrt/openwrt.git openwrt-source
-    
-    - name: Check OpenWrt Version
-      run: |
         cd openwrt-source
-        git describe --tags
-        echo "当前分支: $(git branch --show-current)"
+        echo "OpenWrt源码已克隆，分支: openwrt-21.02"
+        echo "当前目录: $(pwd)"
+        ls -la
     
     - name: Setup Feeds Configuration
       run: |
         cd openwrt-source
+        echo "配置feeds..."
         cat > feeds.conf.default << 'EOF'
-        src-git packages https://git.openwrt.org/feed/packages.git;openwrt-21.02
-        src-git luci https://git.openwrt.org/project/luci.git;openwrt-21.02
-        src-git routing https://git.openwrt.org/feed/routing.git;openwrt-21.02
-        src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-21.02
-        EOF
+src-git packages https://git.openwrt.org/feed/packages.git;openwrt-21.02
+src-git luci https://git.openwrt.org/project/luci.git;openwrt-21.02
+src-git routing https://git.openwrt.org/feed/routing.git;openwrt-21.02
+src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-21.02
+EOF
     
     - name: Copy Configuration File
       run: cp .config openwrt-source/
@@ -52,30 +46,40 @@ jobs:
     - name: Update and Install Feeds
       run: |
         cd openwrt-source
+        echo "更新feeds..."
         ./scripts/feeds update -a
+        echo "安装feeds..."
         ./scripts/feeds install -a
     
     - name: Apply Configuration
       run: |
         cd openwrt-source
+        echo "应用配置..."
         make defconfig
     
     - name: Download Sources
       run: |
         cd openwrt-source
+        echo "下载源码..."
         make -j$(nproc) download
+        echo "安装工具链..."
         make -j$(nproc) tools/install
         make -j$(nproc) toolchain/install
     
-    - name: Check Kernel Configuration
+    - name: Check Configuration
       run: |
         cd openwrt-source
-        if [ -f .config ]; then
-          echo "检查配置..."
-          grep "CONFIG_TARGET" .config
-          grep "CONFIG_KERNEL" .config | head -5
+        echo "检查目标配置..."
+        if grep -q "CONFIG_TARGET_rockchip_rk3128=y" .config; then
+          echo "✓ 已配置 RK3128 目标"
         else
-          echo "错误: .config 文件不存在"
+          echo "✗ 错误: 未配置 RK3128 目标"
+          exit 1
+        fi
+        if grep -q "CONFIG_TARGET_rockchip_rk3128_DEVICE_tlink_r1=y" .config; then
+          echo "✓ 已配置 tlink_r1 设备"
+        else
+          echo "✗ 错误: 未配置 tlink_r1 设备"
           exit 1
         fi
     
@@ -83,32 +87,35 @@ jobs:
       run: |
         cd openwrt-source
         echo "开始编译内核..."
-        make target/linux/compile -j$(nproc) V=s 2>&1 | tee kernel-build.log || make target/linux/compile -j1 V=s 2>&1 | tee kernel-build-detail.log
+        make target/linux/compile -j$(($(nproc)+1)) V=s 2>&1 | tee kernel-build.log
     
     - name: Compile Firmware
       run: |
         cd openwrt-source
         echo "开始编译完整固件..."
-        make -j$(($(nproc)+1)) V=s 2>&1 | tee build.log || make -j1 V=s 2>&1 | tee build-detail.log
+        make -j$(($(nproc)+1)) V=s 2>&1 | tee build.log
     
-    - name: List Output Files
+    - name: Check Output Files
       run: |
         cd openwrt-source
-        if [ -d bin/targets/rockchip/rk3128 ]; then
-          echo "找到输出文件:"
+        echo "检查输出文件..."
+        if [ -d "bin/targets/rockchip/rk3128" ]; then
+          echo "找到固件输出目录:"
           ls -la bin/targets/rockchip/rk3128/
+          echo "文件列表:"
+          find bin/targets/rockchip/rk3128/ -type f -name "*.img*" -o -name "*.bin*" | sort
         else
-          echo "搜索所有镜像文件:"
-          find bin/ -name "*.img*" -o -name "*.bin*" 2>/dev/null || true
-          echo "搜索 rockchip 相关文件:"
-          find bin/ -type d -name "*rockchip*" 2>/dev/null || true
+          echo "错误: 未找到输出目录"
+          echo "搜索所有目录:"
+          find bin/ -type f -name "*.img*" -o -name "*.bin*" 2>/dev/null || echo "未找到任何镜像文件"
+          exit 1
         fi
     
     - name: Upload Firmware Artifacts
       if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-images
+        name: rk3128-printer-firmware
         path: openwrt-source/bin/targets/rockchip/rk3128/
         retention-days: 30
     
@@ -116,20 +123,14 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: |
-          openwrt-source/build.log
-          openwrt-source/build-detail.log
-          openwrt-source/kernel-build.log
-          openwrt-source/kernel-build-detail.log
-          openwrt-source/.config
+        path: openwrt-source/*.log
         retention-days: 7
     
-    - name: Upload Error Logs on Failure
-      if: failure()
+    - name: Upload Config and Feeds
       uses: actions/upload-artifact@v4
       with:
-        name: error-details
+        name: configuration-files
         path: |
-          openwrt-source/
-          !openwrt-source/.git/
+          openwrt-source/.config
+          openwrt-source/feeds.conf.default
         retention-days: 7
