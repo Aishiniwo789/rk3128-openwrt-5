@@ -8,7 +8,7 @@ on:
     - cron: '0 2 * * 0'
 
 env:
-  OPENWRT_VERSION: "21.02.7"
+  OPENWRT_VERSION: "21.02"
   TARGET: "rockchip"
   SUBTARGET: "rk3128"
 
