@@ -1,0 +1,46 @@
+# 核心配置
+CONFIG_TARGET_rockchip=y
+CONFIG_TARGET_rockchip_rk3128=y
+CONFIG_TARGET_rockchip_rk3128_DEVICE_tlink_r1=y
+CONFIG_TARGET_ROOTFS_PARTSIZE=256
+CONFIG_TARGET_ROOTFS_SQUASHFS=y
+
+# 打印机服务
+CONFIG_PACKAGE_p910nd=y
+CONFIG_PACKAGE_cups=y
+CONFIG_PACKAGE_cups-filters=y
+CONFIG_PACKAGE_ghostscript=y
+
+# USB 支持
+CONFIG_PACKAGE_kmod-usb-core=y
+CONFIG_PACKAGE_kmod-usb2=y
+CONFIG_PACKAGE_kmod-usb-storage=y
+CONFIG_PACKAGE_kmod-usb-printer=y
+
+# 网络
+CONFIG_PACKAGE_kmod-r8169=y
+CONFIG_PACKAGE_dnsmasq=y
+CONFIG_PACKAGE_dnsmasq-full=y
+
+# 无线
+CONFIG_PACKAGE_kmod-rtl8xxxu=y
+CONFIG_PACKAGE_kmod-rtl8192cu=y
+CONFIG_PACKAGE_wpad-basic-wolfssl=y
+
+# 管理界面
+CONFIG_PACKAGE_luci=y
+CONFIG_PACKAGE_luci-base=y
+CONFIG_PACKAGE_luci-app-cups=y
+CONFIG_PACKAGE_luci-app-p910nd=y
+CONFIG_PACKAGE_luci-i18n-cups-zh-cn=y
+CONFIG_PACKAGE_luci-i18n-p910nd-zh-cn=y
+
+# 工具
+CONFIG_PACKAGE_htop=y
+CONFIG_PACKAGE_nano=y
+CONFIG_PACKAGE_curl=y
+CONFIG_PACKAGE_openssh-server=y
+CONFIG_PACKAGE_dropbear=y
+
+# 优化
+CONFIG_CCACHE=y
