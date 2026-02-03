@@ -1,9 +1,6 @@
-name: Build OpenWrt 19.07 for RK3128 Printer Server
+name: Build OpenWrt 19.07 for RK3128
 
-on:
-  workflow_dispatch:
-  push:
-    branches: [ main, master ]
+on: [workflow_dispatch]
 
 jobs:
   build:
@@ -14,147 +11,36 @@ jobs:
     - name: Checkout Repository
       uses: actions/checkout@v4
     
-    - name: Install Dependencies for OpenWrt 19.07
+    - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y python2.7 python2.7-dev
-        sudo apt-get install -y build-essential ccache ecj fastjar file g++ gawk gettext git libncurses5-dev libncursesw5-dev libssl-dev python2.7-distutils rsync subversion swig time unzip wget zlib1g-dev lib32z1-dev
+        sudo apt-get install -y build-essential ccache file g++ gawk gettext git libncurses5-dev libssl-dev python2.7-distutils rsync unzip wget zlib1g-dev
         sudo ln -sf /usr/bin/python2.7 /usr/bin/python
-        sudo ln -sf /usr/bin/python2.7 /usr/bin/python2
     
     - name: Clone OpenWrt 19.07.10
-      run: |
-        echo "克隆 OpenWrt 19.07.10 源码..."
-        git clone --depth=1 --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
-        cd openwrt
-        echo "源码克隆完成"
+      run: git clone --depth=1 --branch v19.07.10 https://github.com/openwrt/openwrt.git openwrt
     
     - name: Copy Configuration
-      run: |
-        echo "复制配置文件..."
-        cp .config openwrt/
-        cd openwrt
-        echo "验证配置文件..."
-        echo "配置文件内容摘要:"
-        grep -E "CONFIG_TARGET|CONFIG_DEVICE" .config
+      run: cp .config openwrt/
     
     - name: Setup Feeds
       run: |
         cd openwrt
-        echo "设置软件源..."
         echo "src-git packages https://git.openwrt.org/feed/packages.git;openwrt-19.07" > feeds.conf.default
         echo "src-git luci https://git.openwrt.org/project/luci.git;openwrt-19.07" >> feeds.conf.default
-        echo "src-git routing https://git.openwrt.org/feed/routing.git;openwrt-19.07" >> feeds.conf.default
-        echo "src-git telephony https://git.openwrt.org/feed/telephony.git;openwrt-19.07" >> feeds.conf.default
-        echo "更新软件源..."
         ./scripts/feeds update -a
-        echo "安装软件包..."
         ./scripts/feeds install -a
     
-    - name: Apply Configuration and Verify
+    - name: Configure and Build
       run: |
         cd openwrt
-        echo "应用配置..."
         make defconfig
-        
-        echo "验证最终配置..."
-        echo "========== 目标配置 =========="
-        grep "CONFIG_TARGET" .config | grep -v "^#"
-        echo "========== 设备配置 =========="
-        grep "DEVICE" .config
-        
-        # 强制确保配置正确
-        echo "强制设置正确的设备..."
-        sed -i 's/CONFIG_TARGET_rockchip_armv8_DEVICE_firefly_roc-rk3328-cc=y/# CONFIG_TARGET_rockchip_armv8_DEVICE_firefly_roc-rk3328-cc is not set/' .config
-        sed -i 's/# CONFIG_TARGET_rockchip_rk3128_DEVICE_tlink_r1 is not set/CONFIG_TARGET_rockchip_rk3128_DEVICE_tlink_r1=y/' .config 2>/dev/null || true
-        
-        # 重新应用配置
-        make defconfig
-        
-        echo "最终验证..."
-        if ! grep -q "CONFIG_TARGET_rockchip_rk3128_DEVICE_tlink_r1=y" .config; then
-          echo "错误: 无法配置 tlink_r1 设备"
-          echo "可用设备:"
-          grep "CONFIG_TARGET.*DEVICE" .config
-          exit 1
-        fi
-    
-    - name: Download Sources
-      run: |
-        cd openwrt
-        echo "下载源码包..."
         make -j$(nproc) download
-        echo "安装编译工具..."
-        make -j$(nproc) tools/install
-        make -j$(nproc) toolchain/install
+        make FORCE=1 -j$(($(nproc)+1))
     
-    - name: Build Firmware Step by Step
-      run: |
-        cd openwrt
-        echo "开始编译固件..."
-        
-        # 编译内核
-        echo "编译内核..."
-        make target/linux/compile -j$(($(nproc)+1)) V=s 2>&1 | tee kernel-build.log
-        
-        # 编译基础包
-        echo "编译基础包..."
-        make package/compile -j$(($(nproc)+1)) V=s 2>&1 | tee package-build.log
-        
-        # 编译固件镜像
-        echo "编译固件镜像..."
-        make -j$(($(nproc)+1)) V=s 2>&1 | tee firmware-build.log
-        
-        echo "编译完成"
-    
-    - name: Check and Fix Firmware Format
-      run: |
-        cd openwrt
-        echo "检查固件文件..."
-        
-        if [ -d "bin/targets/rockchip/rk3128" ]; then
-          echo "找到固件目录:"
-          ls -la bin/targets/rockchip/rk3128/
-          
-          # 检查固件文件
-          for file in bin/targets/rockchip/rk3128/*.img* bin/targets/rockchip/rk3128/*.gz; do
-            if [ -f "$file" ]; then
-              echo "检查文件: $file"
-              file "$file"
-              # 如果是 gzip 文件，检查是否可以解压
-              if [[ "$file" == *.gz ]]; then
-                echo "测试解压 $file..."
-                gunzip -t "$file" && echo "解压测试通过" || echo "解压测试失败"
-              fi
-            fi
-          done
-        else
-          echo "错误: 未找到固件目录"
-          echo "搜索所有文件:"
-          find bin/ -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null | head -20
-        fi
-        
-        # 创建刷机需要的 RK3128 标识
-        echo "创建刷机标识文件..."
-        mkdir -p temp_firmware
-        if [ -f "bin/targets/rockchip/rk3128/openwrt-rockchip-rk3128-tlink_r1-squashfs-sysupgrade.img.gz" ]; then
-          cp bin/targets/rockchip/rk3128/openwrt-rockchip-rk3128-tlink_r1-squashfs-sysupgrade.img.gz temp_firmware/
-          # 添加 RK3128 设备标识
-          echo "RK3128" > temp_firmware/device.txt
-          echo "tlink_r1" >> temp_firmware/device.txt
-          echo "固件准备完成"
-        fi
-    
-    - name: Upload Firmware Files
+    - name: Upload Results
       uses: actions/upload-artifact@v4
       with:
-        name: rk3128-firmware-final
+        name: rk3128-firmware
         path: openwrt/bin/targets/rockchip/rk3128/
-        retention-days: 30
-    
-    - name: Upload Build Logs
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-logs-detailed
-        path: openwrt/*.log
-        retention-days: 7
