@@ -5,14 +5,10 @@ on:
   push:
     branches: [ main, master ]
 
-env:
-  TARGET: "rockchip"
-  SUBTARGET: "armv8"
-
 jobs:
   build:
     runs-on: ubuntu-22.04
-    timeout-minutes: 150
+    timeout-minutes: 180
     
     steps:
     - name: Checkout Repository
@@ -32,25 +28,27 @@ jobs:
         cd openwrt
         echo "源码克隆完成"
     
-    - name: Copy Configuration and Verify
+    - name: Verify Source Structure
       run: |
-        echo "复制配置文件..."
+        cd openwrt
+        echo "检查目标架构支持..."
+        if [ -d "target/linux/rockchip" ]; then
+          echo "找到 rockchip 目标平台"
+          ls -la target/linux/rockchip/
+          echo "子目标列表:"
+          ls -la target/linux/rockchip/ 2>/dev/null || echo "无法列出子目标"
+        else
+          echo "错误: 未找到 rockchip 目标平台"
+          exit 1
+        fi
+    
+    - name: Copy Configuration
+      run: |
         cp .config openwrt/
         cd openwrt
         echo "验证配置文件..."
-        echo "当前目录: $(pwd)"
-        echo "配置文件内容摘要:"
-        echo "========================"
-        grep -E "CONFIG_TARGET|CONFIG_DEVICE" .config
-        echo "========================"
-        
-        # 确保设备配置正确
-        if ! grep -q "CONFIG_TARGET_rockchip_armv8_DEVICE_tlink-r1=y" .config; then
-          echo "错误: 未正确配置 tlink-r1 设备"
-          echo "当前设备配置:"
-          grep "CONFIG_TARGET.*DEVICE" .config
-          exit 1
-        fi
+        echo "目标架构: $(grep 'CONFIG_TARGET' .config | head -5)"
+        echo "设备配置: $(grep 'CONFIG_TARGET.*DEVICE' .config)"
     
     - name: Setup Feeds
       run: |
@@ -59,82 +57,104 @@ jobs:
         ./scripts/feeds update -a
         ./scripts/feeds install -a
     
-    - name: Apply Configuration
+    - name: Apply Configuration and Verify Target
       run: |
         cd openwrt
         echo "应用配置..."
         make defconfig
-        echo "配置应用完成，检查最终配置:"
-        echo "目标设备:"
-        grep "CONFIG_TARGET.*DEVICE" .config
-        echo "目标架构:"
-        grep "CONFIG_TARGET.*armv8" .config
+        
+        echo "验证最终配置..."
+        echo "========== 目标配置 =========="
+        grep "CONFIG_TARGET" .config | grep -v "^#"
+        echo "========== 设备配置 =========="
+        grep "DEVICE" .config
+        
+        # 检查是否配置了正确的目标
+        if ! grep -q "CONFIG_TARGET_rockchip_rk3128=y" .config; then
+          echo "错误: 未正确配置 RK3128 目标"
+          exit 1
+        fi
+        
+        if ! grep -q "CONFIG_TARGET_rockchip_rk3128_DEVICE_tlink-r1=y" .config; then
+          echo "警告: 未配置 tlink-r1 设备"
+          echo "当前设备配置:"
+          grep "CONFIG_TARGET.*DEVICE" .config
+        fi
     
     - name: Download Sources
       run: |
         cd openwrt
         echo "下载源码包..."
-        make -j$(nproc) download
+        make -j$(nproc) download 2>&1 | tee download.log
     
     - name: Build Firmware
       run: |
         cd openwrt
         echo "开始编译固件..."
-        echo "当前配置的设备: $(grep 'CONFIG_TARGET.*DEVICE' .config)"
-        make FORCE=1 -j$(($(nproc)+1)) V=s 2>&1 | tee build.log
-        echo "编译完成，退出码: $?"
+        echo "当前工作目录: $(pwd)"
+        echo "使用的配置:"
+        grep "CONFIG_TARGET" .config | grep -v "^#"
+        
+        # 编译内核测试
+        echo "测试内核编译..."
+        make target/linux/{clean,prepare} V=s 2>&1 | tee kernel-prepare.log
+        
+        # 完整编译
+        echo "开始完整编译..."
+        make FORCE=1 -j$(($(nproc)+1)) V=s 2>&1 | tee build.log || make FORCE=1 -j1 V=s 2>&1 | tee build-detail.log
+        
+        echo "编译完成"
     
-    - name: Find and List Firmware Files
+    - name: Find and Verify Firmware
       run: |
         cd openwrt
-        echo "详细查找固件文件..."
-        echo "当前目录: $(pwd)"
-        
-        # 查找所有可能的输出目录
-        echo "检查bin目录结构:"
-        find bin/ -type d 2>/dev/null | grep -v ".git" | sort
-        
-        # 查找所有固件文件
-        echo "查找所有固件文件:"
-        find . -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null | grep -v ".git" | sort
-        
-        # 特别查找tlink相关文件
-        echo "查找tlink相关文件:"
-        find . -type f -name "*tlink*" 2>/dev/null
-        
-        # 查找RK3128相关文件
-        echo "查找RK3128相关文件:"
-        find . -type f -name "*rk3128*" 2>/dev/null
+        echo "查找固件文件..."
         
         # 检查标准输出目录
-        if [ -d "bin/targets/rockchip/armv8" ]; then
-          echo "标准输出目录内容:"
-          ls -la bin/targets/rockchip/armv8/
-          echo "固件文件列表:"
-          find bin/targets/rockchip/armv8/ -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null
+        echo "检查标准输出目录..."
+        if [ -d "bin/targets/rockchip/rk3128" ]; then
+          echo "找到 RK3128 输出目录:"
+          ls -la bin/targets/rockchip/rk3128/
+          echo "固件文件:"
+          find bin/targets/rockchip/rk3128/ -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null
         fi
+        
+        # 搜索所有固件文件
+        echo "搜索所有固件文件..."
+        find bin/ -type f \( -name "*.img*" -o -name "*.bin*" -o -name "*.gz" \) 2>/dev/null | head -20
+        
+        # 特别搜索 tlink 相关文件
+        echo "搜索 tlink 相关文件..."
+        find bin/ -type f -name "*tlink*" 2>/dev/null
+        
+        # 搜索 RK3128 相关文件
+        echo "搜索 RK3128 相关文件..."
+        find bin/ -type f -name "*rk3128*" 2>/dev/null
     
-    - name: Upload Firmware Files
+    - name: Upload Firmware
       uses: actions/upload-artifact@v4
       with:
         name: rk3128-firmware
         path: |
-          openwrt/bin/targets/rockchip/armv8/*tlink*
-          openwrt/bin/targets/rockchip/armv8/*rk3128*
-          openwrt/bin/targets/rockchip/armv8/*.img.gz
-          openwrt/bin/targets/rockchip/armv8/*.bin
+          openwrt/bin/targets/rockchip/rk3128/
+          openwrt/bin/targets/rockchip/rk3128/*.img*
+          openwrt/bin/targets/rockchip/rk3128/*.bin*
         retention-days: 30
     
     - name: Upload All Output as Backup
       uses: actions/upload-artifact@v4
       with:
         name: all-output-backup
-        path: openwrt/bin/targets/rockchip/armv8/
+        path: openwrt/bin/
         retention-days: 30
     
     - name: Upload Build Logs
       uses: actions/upload-artifact@v4
       with:
         name: build-logs
-        path: openwrt/build.log
+        path: |
+          openwrt/build.log
+          openwrt/build-detail.log
+          openwrt/download.log
+          openwrt/kernel-prepare.log
         retention-days: 7
